@@ -81,6 +81,6 @@ Kotlin · Android Media3 · AWS Lambda · Amazon Bedrock (Amazon Nova) · Figtre
 
 ## Known limitations
 
-- Today *What did they say?* and *Catch me up* work with movies played in the test-bench TV app. Working inside other apps (Netflix, Prime Video…) needs Fire OS to share subtitles with the phone, which is the integration we're proposing.
+- Today *What did they say?* and *Catch me up* work with movies played in the test-bench TV app. Inside other apps (Netflix, Prime Video…) the rewind part already works through the app's media session, but two pieces need Fire OS support, which is the integration we're proposing: a way to switch on another app's subtitles for a moment (*What did they say?*), and access to the playing title's subtitle text on the TV (*Catch me up*, whose recap the TV relays to the phone).
 - Recaps are based on the subtitles only, so they can occasionally mix up who said what.
 - Tested on emulators; not yet run on a physical Fire TV.

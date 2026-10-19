@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets Alexa voice commands drive our media session on Fire OS before 14 (not needed on Fire OS 14+). -->
+    <uses-permission android:name="com.amazon.permission.media.session.voicecommandcontrol" />
 
     <uses-feature
         android:name="android.hardware.touchscreen"

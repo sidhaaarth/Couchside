@@ -13,12 +13,14 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import org.json.JSONObject
 import kotlin.concurrent.thread
@@ -26,7 +28,14 @@ import kotlin.concurrent.thread
 class PlayerActivity : Activity() {
     private lateinit var movie: Movie
     private val main = Handler(Looper.getMainLooper())
+    // Fire TV multimedia requirements: the player and its media session exist only while the screen is visible
+    // (built in onStart, released in onStop), the player handles audio focus, and Alexa can control the session.
     private lateinit var player: ExoPlayer
+    private var session: MediaSession? = null
+    private lateinit var playerView: PlayerView
+    private lateinit var item: MediaItem
+    private var startPos = 0L
+    private var playWhenReady = true
     private lateinit var badge: LinearLayout
     private lateinit var badgeText: TextView
     private lateinit var logo: ImageView
@@ -54,11 +63,9 @@ class PlayerActivity : Activity() {
         movie = Catalog.byId(intent.getStringExtra("id"))
         Remote.start()
 
-        player = ExoPlayer.Builder(this).setSeekBackIncrementMs(15_000).setSeekForwardIncrementMs(15_000).build()
         // Fire TV logo top-left: shown for a few seconds at launch, then whenever the player controls are up.
         logo = ImageView(this).apply { setImageResource(R.drawable.firetv_logo); adjustViewBounds = true }
-        val playerView = PlayerView(this).apply {
-            player = this@PlayerActivity.player
+        playerView = PlayerView(this).apply {
             setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
                 main.removeCallbacks(hideLogo)
                 logo.visibility = v
@@ -82,22 +89,32 @@ class PlayerActivity : Activity() {
         })
         main.postDelayed(hideLogo, 5_000)
 
-        val item = MediaItem.Builder().setUri(movie.videoUrl)
+        val builder = MediaItem.Builder().setUri(movie.videoUrl)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(movie.title).build())
         movie.subtitleAsset?.let { srt ->
-            item.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(Uri.parse("asset:///$srt"))
+            builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(Uri.parse("asset:///$srt"))
                 .setMimeType(MimeTypes.APPLICATION_SUBRIP).setLanguage("en")
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()))
             cues = Srt.parse(assets.open(srt).bufferedReader().use { it.readText() })
         }
-        player.setMediaItem(item.build(), intent.getLongExtra("pos", movie.startMs))
-        setSubtitles(false)
-        player.prepare()
-        player.play()
+        item = builder.build()
+        startPos = intent.getLongExtra("pos", movie.startMs)
     }
 
     override fun onStart() {
         super.onStart()
+        player = ExoPlayer.Builder(this)
+            .setSeekBackIncrementMs(15_000).setSeekForwardIncrementMs(15_000)
+            // Request/abandon audio focus and duck or pause for Alexa and other apps; pause if audio output goes away.
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        session = MediaSession.Builder(this, player).build() // transport controls + Alexa voice ("Alexa, pause")
+        playerView.player = player
+        player.setMediaItem(item, startPos)
+        setSubtitles(false)
+        player.playWhenReady = playWhenReady
+        player.prepare()
         Remote.handler = ::onCommand
         main.post(tick)
     }
@@ -109,9 +126,18 @@ class PlayerActivity : Activity() {
 
     override fun onStop() {
         main.removeCallbacks(tick)
+        main.removeCallbacks(endWhatSay)
+        main.removeCallbacks(hideBadge)
+        badge.visibility = View.GONE
         Remote.handler = null
         Remote.broadcast(Remote.idle)
-        player.pause()
+        // Release everything playback holds (decoder, buffers, session) — don't wait for onDestroy.
+        startPos = player.currentPosition
+        playWhenReady = player.playWhenReady
+        session?.release()
+        session = null
+        playerView.player = null
+        player.release()
         super.onStop()
     }
 
@@ -173,7 +199,6 @@ class PlayerActivity : Activity() {
 
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
-        player.release()
         super.onDestroy()
     }
 }
