@@ -7,4 +7,3 @@ local.properties
 media/*.mov
 __pycache__/
 .env
-SUBMISSION.md
